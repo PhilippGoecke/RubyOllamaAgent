@@ -9,4 +9,4 @@ for model in $PLANNER_MODEL $CODER_MODEL; do
   fi
 done
 mkdir -p $(pwd)/workspace
-podman run --interactive --tty --volume $(pwd)/workspace:/rubyagent/workspace rubyagent:demo
+podman run --interactive --tty --volume $(pwd)/workspace:/rubyagent/workspace --env PLANNER_MODEL --env CODER_MODEL rubyagent:demo
