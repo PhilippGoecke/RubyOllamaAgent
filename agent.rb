@@ -196,7 +196,7 @@ end
 
 def verify_iteration(task:, memory:, candidate:)
   prompt = <<~PROMPT
-    You are a strict verifier for an autonomous coding agent.
+    You are a strict verifier for an autonomous agent.
     Check whether the candidate is valid, safe, and aligned with the task.
 
     Task:
@@ -213,6 +213,7 @@ def verify_iteration(task:, memory:, candidate:)
   PROMPT
 
   out = call_ollama(prompt, VERIFY_MODEL)
+  puts "VerifyIteration: #{out}"
   parsed = JSON.parse(out)
 
   {
