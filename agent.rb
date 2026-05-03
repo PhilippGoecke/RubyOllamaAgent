@@ -143,7 +143,27 @@ TOOLS = {
 
 # ---------- LLM ----------
 
+def model_exists?(model)
+  uri = URI(OLLAMA_URL.sub('/api/generate', '/api/tags'))
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.open_timeout = HTTP_OPEN_TIMEOUT
+  http.read_timeout = HTTP_READ_TIMEOUT
+
+  req = Net::HTTP::Get.new(uri.path)
+  res = http.request(req)
+  
+  return false unless res.is_a?(Net::HTTPSuccess)
+  
+  models = JSON.parse(res.body)['models'] || []
+  models.any? { |m| m['name'].start_with?(model) }
+rescue
+  false
+end
+
 def call_ollama(prompt, model)
+  return "Error: model not specified" unless model
+  return "Error: model not found in ollama" unless model_exists?(model)
+
   uri = URI(OLLAMA_URL)
   http = Net::HTTP.new(uri.host, uri.port)
   http.open_timeout = HTTP_OPEN_TIMEOUT
