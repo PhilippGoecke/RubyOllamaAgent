@@ -1,0 +1,2 @@
+# RubyOllamaAgent
+Ruby Ollama Agent
