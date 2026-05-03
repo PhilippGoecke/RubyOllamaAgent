@@ -196,7 +196,7 @@ def agent(task, steps=6)
   memory = []
 
   steps.times do |i|
-    prompt = "You are a software engineering agent. Task: #{task}. Memory: #{memory}. Return JSON {thought, action, input}"
+    prompt = "You are a software engineering agent. Write all generated code as file to workspace. Task: #{task}. Memory: #{memory}. Return JSON {thought, action, input}"
 
     out = call_ollama(prompt, PLANNER_MODEL)
 
