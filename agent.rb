@@ -6,8 +6,8 @@ require 'nokogiri'
 require 'open3'
 
 OLLAMA_URL = ENV['OLLAMA_URL'] || 'http://host.containers.internal:11434/api/generate'
-PLANNER_MODEL = ENV['PLANNER_MODEL'] || 'mistral:7b'
-CODER_MODEL = ENV['CODER_MODEL'] || 'qwen2.5-coder:7b'
+PLANNER_MODEL = ENV['PLANNER_MODEL'] || 'llama3.2:3b'
+CODER_MODEL = ENV['CODER_MODEL'] || 'codellama:7b'
 OLLAMA_TOKEN = ENV['OLLAMA_TOKEN']
 
 WORKSPACE_DIR = File.expand_path('./workspace')
