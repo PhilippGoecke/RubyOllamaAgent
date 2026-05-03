@@ -232,7 +232,40 @@ def agent(task, steps=6)
   memory = []
 
   steps.times do |i|
-    prompt = "You are a software engineering agent. Write all generated code as file to workspace. Task: #{task}. Memory: #{memory}. Return JSON {thought, action, input}"
+    prompt = <<~PROMPT
+      You are an autonomous professional agent.
+
+      Primary rule:
+      - Write all generated code as files inside the workspace only.
+
+      Task:
+      #{task}
+
+      Available tools:
+      - write_file: write or overwrite a file in the workspace
+      - read_file: read a file in the workspace
+      - list_files: list files in the workspace
+      - ruby: run small Ruby snippets
+      - run_tests: run tests in the workspace
+      - fetch_url: fetch web content
+      - github_read: read a GitHub file
+
+      Working rules:
+      - Prefer small incremental steps.
+      - If code is needed, use write_file with complete file content.
+      - Use paths relative to the workspace.
+      - Do not return code directly unless using write_file.
+      - Read files before modifying them when useful.
+      - Run tests when code changes affect behavior.
+      - Finish only when the requested files have been written and the task is complete.
+      - Return exactly one JSON object and no extra text.
+
+      Required JSON format:
+      {"thought":"short reasoning","action":"write_file|read_file|list_files|ruby|run_tests|fetch_url|github_read|finish","input":"string"}
+
+      Memory:
+      #{memory.to_json}
+    PROMPT
 
     out = call_ollama(prompt, PLANNER_MODEL)
     puts "Agent step #{i}: #{out}"
