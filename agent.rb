@@ -4,10 +4,12 @@ require 'uri'
 require 'fileutils'
 require 'nokogiri'
 require 'open3'
+require 'base64'
 
 OLLAMA_URL = ENV['OLLAMA_URL'] || 'http://host.containers.internal:11434/api/generate'
 PLANNER_MODEL = ENV['PLANNER_MODEL'] || 'llama3.2:3b'
 CODER_MODEL = ENV['CODER_MODEL'] || 'codellama:7b'
+VERIFY_MODEL = ENV['VERIFY_MODEL'] || PLANNER_MODEL
 OLLAMA_TOKEN = ENV['OLLAMA_TOKEN']
 
 WORKSPACE_DIR = File.expand_path('./workspace')
@@ -190,6 +192,40 @@ def route(action)
   %w[write_file read_file ruby list_files run_tests].include?(action) ? CODER_MODEL : PLANNER_MODEL
 end
 
+# ---------- VERIFY ----------
+
+def verify_iteration(task:, memory:, candidate:)
+  prompt = <<~PROMPT
+    You are a strict verifier for an autonomous coding agent.
+    Check whether the candidate is valid, safe, and aligned with the task.
+
+    Task:
+    #{task}
+
+    Memory:
+    #{memory.to_json}
+
+    Candidate:
+    #{candidate.to_json}
+
+    Return ONLY JSON with this shape:
+    {"ok": true|false, "feedback": "short reason"}
+  PROMPT
+
+  out = call_ollama(prompt, VERIFY_MODEL)
+  parsed = JSON.parse(out)
+
+  {
+    'ok' => !!parsed['ok'],
+    'feedback' => (parsed['feedback'] || '').to_s
+  }
+rescue => e
+  {
+    'ok' => false,
+    'feedback' => "verification failed: #{e.message}"
+  }
+end
+
 # ---------- AGENT ----------
 
 def agent(task, steps=6)
@@ -199,7 +235,6 @@ def agent(task, steps=6)
     prompt = "You are a software engineering agent. Write all generated code as file to workspace. Task: #{task}. Memory: #{memory}. Return JSON {thought, action, input}"
 
     out = call_ollama(prompt, PLANNER_MODEL)
-
     puts "Agent step #{i}: #{out}"
 
     begin
@@ -208,7 +243,24 @@ def agent(task, steps=6)
       break
     end
 
-    return j['input'] if j['action'] == 'finish'
+    # Always verify planner output
+    plan_check = verify_iteration(task: task, memory: memory, candidate: j)
+    memory << {step: i, action: 'verify_plan', result: plan_check}
+    next unless plan_check['ok']
+
+    if j['action'] == 'finish'
+      # Always verify final answer before returning
+      final_check = verify_iteration(
+        task: task,
+        memory: memory,
+        candidate: {'action' => 'finish', 'input' => j['input']}
+      )
+      memory << {step: i, action: 'verify_final', result: final_check}
+      return j['input'] if final_check['ok']
+
+      memory << {step: i, action: 'verify_feedback', result: final_check['feedback']}
+      next
+    end
 
     tool = TOOLS[j['action']]
     next unless tool
@@ -217,7 +269,15 @@ def agent(task, steps=6)
     refined = call_ollama("clean: #{j['input']}", model)
 
     res = tool.call(refined)
-    memory << {step:i, action:j['action'], result:res}
+    memory << {step: i, action: j['action'], result: res}
+
+    # Always verify tool result
+    result_check = verify_iteration(
+      task: task,
+      memory: memory,
+      candidate: {'action' => j['action'], 'input' => refined, 'result' => res}
+    )
+    memory << {step: i, action: 'verify_result', result: result_check}
   end
 
   'done'
