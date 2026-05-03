@@ -284,5 +284,9 @@ def agent(task, steps=6)
 end
 
 if __FILE__ == $0
-  puts agent('Build a CLI tool that lists files and writes logs')
+  task = ARGV.join(' ').strip
+  task = ENV['AGENT_TASK'].to_s.strip if task.empty?
+  task = 'Build a Ruby CLI called "devdigest" that scans a folder, summarizes file stats (count, size, extensions), prints a colorful terminal report, and writes a timestamped JSON + log file. Include a clean class-based design and Minitest tests.' if task.empty?
+
+  puts agent(task)
 end
