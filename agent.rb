@@ -56,7 +56,7 @@ end
 # ---------- TIMEOUT CONFIG ----------
 HTTP_OPEN_TIMEOUT = (ENV['HTTP_OPEN_TIMEOUT'] || 5).to_i
 HTTP_READ_TIMEOUT = (ENV['HTTP_READ_TIMEOUT'] || 10).to_i
-LLM_TIMEOUT = (ENV['LLM_TIMEOUT'] || 30).to_i
+LLM_TIMEOUT = (ENV['LLM_TIMEOUT'] || 60).to_i
 
 # ---------- WEB ----------
 
