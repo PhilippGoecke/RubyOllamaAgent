@@ -273,7 +273,7 @@ def agent(task, steps=6)
 
     begin
       j = JSON.parse(out)
-    rescue
+    rescue => e
       memory << { step: i, action: 'parse_planner_output', result: "failed: #{e.message}" }
       next
     end
