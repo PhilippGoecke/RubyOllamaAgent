@@ -1,5 +1,5 @@
 export PLANNER_MODEL="qwen3.6:35b"
-export CODER_MODEL="gemma4:31b"
+export CODER_MODEL="gemma4:31b" # codellama:34b
 
 podman build --no-cache --rm --file Containerfile --tag rubyagent:demo .
 # Test if models are present, if not pull them
