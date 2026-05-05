@@ -10,8 +10,8 @@ https://ollama.com/
 [Service]
 Environment="OLLAMA_HOST=\"http://0.0.0.0:11434\""
 ```
-systemctl daemon-reload
-systemctl restart ollama.service
+`systemctl daemon-reload`  
+`systemctl restart ollama.service`  
 
 ## Run Ruby Agent
 
