@@ -1,9 +1,9 @@
-# RubyOllamaAgent
-Ruby Ollama Agent
+# RubyOllamaAgent  
+Ruby Ollama Agent  
 
-# Setup Ollama
-https://ollama.com/
-`curl -fsSL https://ollama.com/install.sh | sh`
+# Setup Ollama  
+https://ollama.com/  
+`curl -fsSL https://ollama.com/install.sh | sh`  
 
 `systemctl edit ollama.service`
 ```editor
