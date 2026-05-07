@@ -133,6 +133,16 @@ rescue => e
   "Error: #{e.message}"
 end
 
+def create_code(input)
+  data = JSON.parse(input)
+  path = safe_path(data['path'])
+  FileUtils.mkdir_p(File.dirname(path))
+  File.write(path, data['content'])
+  "created"
+rescue => e
+  "Error: #{e.message}"
+end
+
 TOOLS = {
   'ruby' => method(:run_ruby),
   'write_file' => method(:write_file),
@@ -140,7 +150,8 @@ TOOLS = {
   'list_files' => method(:list_files),
   'fetch_url' => method(:fetch_url),
   'github_read' => method(:github_read),
-  'run_tests' => method(:run_tests)
+  'run_tests' => method(:run_tests),
+  'create_code' => method(:create_code)
 }
 
 # ---------- LLM ----------
@@ -247,6 +258,7 @@ def planner_prompt(task, memory)
     - run_tests: run tests in the workspace
     - fetch_url: fetch web content
     - github_read: read a GitHub file
+    - create_code: generate new code
 
     Planning rules:
     - Prefer small incremental steps.
@@ -258,7 +270,7 @@ def planner_prompt(task, memory)
     - Return exactly one JSON object and no extra text.
 
     Required JSON format:
-    {"thought":"short reasoning","action":"write_file|read_file|list_files|ruby|run_tests|fetch_url|github_read|finish","input":"string"}
+    {"thought":"short reasoning","action":"write_file|read_file|list_files|ruby|create_code|run_tests|fetch_url|github_read|finish","input":"string"}
 
     Memory:
     #{memory.to_json}
@@ -322,7 +334,7 @@ def agent(task, steps=6)
     next unless tool
 
     model = route(j['action'])
-    refined = call_ollama("clean: #{j['input']}", model)
+    refined = call_ollama(coder_prompt("#{j['action']}: #{j['input']}"), model)
 
     res = tool.call(refined)
     memory << {step: i, action: j['action'], result: res}
