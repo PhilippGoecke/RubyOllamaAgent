@@ -174,11 +174,21 @@ def github_read(input)
   req['Accept'] = 'application/vnd.github+json'
 
   res = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |h| h.request(req) }
-  
+
+  folder = File.join(WORKSPACE_DIR, 'github', d['owner'].to_s, d['repo'].to_s)
+  FileUtils.mkdir_p(folder)
+  filename = d['path'].to_s.gsub(%r{^/}, '').gsub(/[^\w.-]/, '_')
+  filename = 'index' if filename.empty?
+  File.write(File.join(folder, "#{filename}.json"), res.body)
+
   return "HTTP #{res.code}" unless res.is_a?(Net::HTTPSuccess)
 
   j = JSON.parse(res.body)
-  return Base64.decode64(j['content']) if j['content']
+  if j['content']
+    decoded = Base64.decode64(j['content'])
+    File.write(File.join(folder, filename), decoded)
+    return decoded
+  end
   res.body
 rescue => e
   "Error: #{e.message}"
