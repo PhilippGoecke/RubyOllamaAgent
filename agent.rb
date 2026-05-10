@@ -148,6 +148,16 @@ def fetch_url(input)
 
   body = res.body
   body = html_to_text(body) if d['text_only']
+
+  uri = URI(d['url'])
+  folder = File.join(WORKSPACE_DIR, uri.host.to_s.gsub(/[^\w.-]/, '_'))
+  FileUtils.mkdir_p(folder)
+  path_part = uri.path.to_s
+  path_part = '/index' if path_part.empty? || path_part.end_with?('/')
+  filename = path_part.gsub(%r{^/}, '').gsub(/[^\w.-]/, '_')
+  filename += d['text_only'] ? '.txt' : '.html'
+  File.write(File.join(folder, filename), body)
+
   body[0, 3000]
 rescue => e
   "Error: #{e.message}"
@@ -164,6 +174,7 @@ def github_read(input)
   req['Accept'] = 'application/vnd.github+json'
 
   res = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |h| h.request(req) }
+  
   return "HTTP #{res.code}" unless res.is_a?(Net::HTTPSuccess)
 
   j = JSON.parse(res.body)
