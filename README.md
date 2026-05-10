@@ -15,4 +15,4 @@ Environment="OLLAMA_HOST=\"http://0.0.0.0:11434\""
 
 ## Run Ruby Agent
 
-`bash https://www.localstack.cloud/`  
+`bash podman-run-rubyagent.bash`  
