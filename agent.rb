@@ -347,7 +347,21 @@ def agent(task, steps=6)
   steps.times do |i|
     prompt = planner_prompt(task, memory)
 
-    out = call_ollama(prompt, PLANNER_MODEL)
+    out = nil
+    attempts = 0
+    max_attempts = 3
+    begin
+      attempts += 1
+      out = call_ollama(prompt, PLANNER_MODEL)
+    rescue Timeout::Error, Net::ReadTimeout, Net::OpenTimeout => e
+      if attempts < max_attempts
+        puts "Agent step #{i}: LLM timeout (attempt #{attempts}/#{max_attempts}), retrying: #{e.message}"
+        retry
+      else
+        memory << { step: i, action: 'call_planner', result: "failed after #{max_attempts} attempts: #{e.message}" }
+        next
+      end
+    end
     puts "Agent step #{i}: #{out}"
 
     begin
