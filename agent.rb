@@ -241,6 +241,8 @@ end
 # ---------- PROMPTS ----------
 
 def planner_prompt(task, memory)
+  tools_list = TOOLS.keys.join('|')
+  
   <<~PROMPT
     You are an autonomous planning agent.
 
@@ -270,7 +272,7 @@ def planner_prompt(task, memory)
     - Return exactly one JSON object and no extra text.
 
     Required JSON format:
-    {"thought":"short reasoning","action":"write_file|read_file|list_files|ruby|create_code|run_tests|fetch_url|github_read|finish","input":"string"}
+    {"thought":"short reasoning","action":"#{tools_list}|finish","input":"string"}
 
     Memory:
     #{memory.to_json}
