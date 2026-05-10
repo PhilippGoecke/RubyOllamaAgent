@@ -26,6 +26,9 @@ end
 # ---------- TOOLS ----------
 
 RUBY_EXEC_TIMEOUT = (ENV['RUBY_EXEC_TIMEOUT'] || 10).to_i
+VERIFY_ENABLED = ENV.fetch('VERIFY_ENABLED', 'true') == 'true'
+MEMORY_LIMIT = (ENV['MEMORY_LIMIT'] || 20).to_i
+RESULT_TRUNCATE = (ENV['RESULT_TRUNCATE'] || 2000).to_i
 RUBY_FORBIDDEN_PATTERNS = [
   /\b(?:system|exec|spawn|fork|`|%x|popen|open3|kernel\.open)\b/i,
   /\brequire\s+['"](?:open3|net\/|socket|fileutils|ffi)['"]/i,
@@ -58,22 +61,17 @@ def run_ruby(code)
   status = nil
   Open3.popen3('ruby', '--disable-gems', '-W0', '-e', wrapper, chdir: WORKSPACE_DIR) do |stdin, stdout, stderr, wait_thr|
     stdin.close
-    deadline = Time.now + RUBY_EXEC_TIMEOUT
-    begin
-      while wait_thr.alive?
-        if Time.now > deadline
-          Process.kill('KILL', wait_thr.pid) rescue nil
-          return "Error: execution timed out after #{RUBY_EXEC_TIMEOUT}s"
-        end
-        sleep 0.05
-      end
-      stdout_str = stdout.read.to_s
-      stderr_str = stderr.read.to_s
-      status = wait_thr.value
-    rescue => e
+    # Drain pipes concurrently to avoid deadlock on large output
+    out_thr = Thread.new { stdout.read.to_s }
+    err_thr = Thread.new { stderr.read.to_s }
+    if wait_thr.join(RUBY_EXEC_TIMEOUT).nil?
       Process.kill('KILL', wait_thr.pid) rescue nil
-      return "Error: #{e.message}"
+      out_thr.kill; err_thr.kill
+      return "Error: execution timed out after #{RUBY_EXEC_TIMEOUT}s"
     end
+    stdout_str = out_thr.value
+    stderr_str = err_thr.value
+    status = wait_thr.value
   end
 
   return stderr_str unless stderr_str.empty?
@@ -150,7 +148,7 @@ def fetch_url(input)
 
   body = res.body
   body = html_to_text(body) if d['text_only']
-  body[0..3000]
+  body[0, 3000]
 rescue => e
   "Error: #{e.message}"
 end
@@ -178,18 +176,8 @@ end
 # ---------- TESTS ----------
 
 def run_tests(_)
-  stdout, stderr, status = Open3.capture3("cd #{WORKSPACE_DIR} && ruby -Ilib:test")
+  stdout, stderr, status = Open3.capture3('ruby', '-Ilib:test', chdir: WORKSPACE_DIR)
   {ok: status.success?, out: stdout, err: stderr}.to_json
-rescue => e
-  "Error: #{e.message}"
-end
-
-def create_code(input)
-  data = JSON.parse(input)
-  path = safe_path(data['path'])
-  FileUtils.mkdir_p(File.dirname(path))
-  File.write(path, data['content'])
-  "created"
 rescue => e
   "Error: #{e.message}"
 end
@@ -201,13 +189,14 @@ TOOLS = {
   'list_files' => method(:list_files),
   'fetch_url' => method(:fetch_url),
   'github_read' => method(:github_read),
-  'run_tests' => method(:run_tests),
-  'create_code' => method(:create_code)
+  'run_tests' => method(:run_tests)
 }
 
 # ---------- LLM ----------
 
+@model_cache = {}
 def model_exists?(model)
+  return @model_cache[model] if @model_cache.key?(model)
   uri = URI(OLLAMA_URL.sub('/api/generate', '/api/tags'))
   http = Net::HTTP.new(uri.host, uri.port)
   http.open_timeout = HTTP_OPEN_TIMEOUT
@@ -215,11 +204,11 @@ def model_exists?(model)
 
   req = Net::HTTP::Get.new(uri.path)
   res = http.request(req)
-  
-  return false unless res.is_a?(Net::HTTPSuccess)
-  
+
+  return @model_cache[model] = false unless res.is_a?(Net::HTTPSuccess)
+
   models = JSON.parse(res.body)['models'] || []
-  models.any? { |m| m['name'].start_with?(model) }
+  @model_cache[model] = models.any? { |m| m['name'].start_with?(model) }
 rescue
   false
 end
@@ -250,13 +239,16 @@ end
 
 # ---------- ROUTER ----------
 
+CODER_ACTIONS = %w[write_file read_file ruby list_files run_tests].freeze
 def route(action)
-  %w[write_file read_file ruby list_files run_tests].include?(action) ? CODER_MODEL : PLANNER_MODEL
+  CODER_ACTIONS.include?(action) ? CODER_MODEL : PLANNER_MODEL
 end
 
 # ---------- VERIFY ----------
 
 def verify_iteration(task:, memory:, candidate:)
+  return {'ok' => true, 'feedback' => 'verification disabled'} unless VERIFY_ENABLED
+
   prompt = <<~PROMPT
     You are a strict verifier for an autonomous agent.
     Check whether the candidate is valid, safe, and aligned with the task.
@@ -293,7 +285,8 @@ end
 
 def planner_prompt(task, memory)
   tools_list = TOOLS.keys.join('|')
-  
+  trimmed = memory.last(MEMORY_LIMIT)
+
   <<~PROMPT
     You are an autonomous planning agent.
 
@@ -311,7 +304,6 @@ def planner_prompt(task, memory)
     - run_tests: run tests in the workspace
     - fetch_url: fetch web content
     - github_read: read a GitHub file
-    - create_code: generate new code
 
     Planning rules:
     - Use the available tools whenever they can support planning or coding (e.g., read files for context, list files to explore, fetch URLs or GitHub files for references, run ruby snippets or tests to verify assumptions).
@@ -327,7 +319,7 @@ def planner_prompt(task, memory)
     {"thought":"short reasoning","action":"#{tools_list}|finish","input":"string"}
 
     Memory:
-    #{memory.to_json}
+    #{trimmed.to_json}
   PROMPT
 end
 
@@ -391,7 +383,9 @@ def agent(task, steps=6)
     refined = call_ollama(coder_prompt("#{j['action']}: #{j['input']}"), model)
 
     res = tool.call(refined)
-    memory << {step: i, action: j['action'], result: res}
+    res_str = res.to_s
+    res_trunc = res_str.length > RESULT_TRUNCATE ? "#{res_str[0, RESULT_TRUNCATE]}...[truncated]" : res_str
+    memory << {step: i, action: j['action'], result: res_trunc}
 
     # Always verify tool result
     result_check = verify_iteration(
