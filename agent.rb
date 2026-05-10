@@ -341,12 +341,23 @@ end
 
 # ---------- AGENT ----------
 
+# Main agent loop: drives the planner LLM through up to `steps` iterations,
+# executes tools, verifies each step, and returns the final answer when ready.
+#
+# @param task  [String]  the user task / goal description
+# @param steps [Integer] maximum number of planning iterations
+# @return      [String]  the final answer from the planner, or 'done' if no
+#                        verified finish action was produced within `steps`
 def agent(task, steps=6)
+  # Rolling memory of all steps, actions, and verification results so far.
+  # This is fed back into the planner prompt for context on each iteration.
   memory = []
 
   steps.times do |i|
+    # Build the planner prompt from the task and accumulated memory.
     prompt = planner_prompt(task, memory)
 
+    # --- Call the planner LLM with retry on transient network/timeout errors ---
     out = nil
     attempts = 0
     max_attempts = 3
@@ -355,53 +366,67 @@ def agent(task, steps=6)
       out = call_ollama(prompt, PLANNER_MODEL)
     rescue Timeout::Error, Net::ReadTimeout, Net::OpenTimeout => e
       if attempts < max_attempts
+        # Transient failure: log and retry the same call.
         puts "Agent step #{i}: LLM timeout (attempt #{attempts}/#{max_attempts}), retrying: #{e.message}"
         retry
       else
+        # Give up after max_attempts; record failure in memory and move on.
         memory << { step: i, action: 'call_planner', result: "failed after #{max_attempts} attempts: #{e.message}" }
         next
       end
     end
     puts "Agent step #{i}: #{out}"
 
+    # --- Parse the planner's JSON output ---
     begin
       j = JSON.parse(out)
     rescue => e
+      # Malformed JSON: record and skip to next iteration so the planner can retry.
       memory << { step: i, action: 'parse_planner_output', result: "failed: #{e.message}" }
       next
     end
 
-    # Always verify planner output
+    # Always verify the planner's proposed action before executing it.
     plan_check = verify_iteration(task: task, memory: memory, candidate: j)
     memory << {step: i, action: 'verify_plan', result: plan_check}
+    # If the verifier rejects the plan, skip execution this iteration.
     next unless plan_check['ok']
 
+    # --- Handle the special 'finish' action: planner thinks task is complete ---
     if j['action'] == 'finish'
-      # Always verify final answer before returning
+      # Double-check the final answer with the verifier before returning it.
       final_check = verify_iteration(
         task: task,
         memory: memory,
         candidate: {'action' => 'finish', 'input' => j['input']}
       )
       memory << {step: i, action: 'verify_final', result: final_check}
+      # Verified: return the final answer to the caller.
       return j['input'] if final_check['ok']
 
+      # Not verified: surface verifier feedback into memory so the planner can adjust.
       memory << {step: i, action: 'verify_feedback', result: final_check['feedback']}
       next
     end
 
+    # --- Resolve the tool requested by the planner ---
     tool = TOOLS[j['action']]
+    # Unknown tool name: silently skip (planner will see no result and try again).
     next unless tool
 
+    # Route to the appropriate model for this action and let the coder model
+    # refine/clean the raw input before passing it to the tool.
     model = route(j['action'])
     refined = call_ollama(coder_prompt("#{j['action']}: #{j['input']}"), model)
 
+    # Execute the tool with the refined input and capture its result.
     res = tool.call(refined)
+    # Truncate large results so memory/prompt size stays manageable.
     res_str = res.to_s
     res_trunc = res_str.length > RESULT_TRUNCATE ? "#{res_str[0, RESULT_TRUNCATE]}...[truncated]" : res_str
     memory << {step: i, action: j['action'], result: res_trunc}
 
-    # Always verify tool result
+    # Always verify the tool result so the planner gets feedback on success/failure.
     result_check = verify_iteration(
       task: task,
       memory: memory,
@@ -410,6 +435,7 @@ def agent(task, steps=6)
     memory << {step: i, action: 'verify_result', result: result_check}
   end
 
+  # Reached the step limit without a verified finish; signal completion fallback.
   'done'
 end
 
