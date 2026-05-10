@@ -25,12 +25,63 @@ end
 
 # ---------- TOOLS ----------
 
+RUBY_EXEC_TIMEOUT = (ENV['RUBY_EXEC_TIMEOUT'] || 10).to_i
+RUBY_FORBIDDEN_PATTERNS = [
+  /\b(?:system|exec|spawn|fork|`|%x|popen|open3|kernel\.open)\b/i,
+  /\brequire\s+['"](?:open3|net\/|socket|fileutils|ffi)['"]/i,
+  /\b(?:File|FileUtils|Dir)\.(?:delete|unlink|rm|rm_rf|rm_r)\b/,
+  /\bENV\b\s*\[/,
+  /\beval\b|\bbinding\b|\bsend\b|\b__send__\b/,
+  /\bexit\b|\babort\b/
+]
+
 def run_ruby(code)
-  eval(code).inspect
+  return "Error: empty code" if code.nil? || code.strip.empty?
+  RUBY_FORBIDDEN_PATTERNS.each do |re|
+    return "Error: forbidden construct in code (#{re.source})" if code =~ re
+  end
+
+  wrapper = <<~RUBY
+    $SAFE_CODE = <<'__SAFE_CODE_END__'
+    #{code}
+    __SAFE_CODE_END__
+    begin
+      result = eval($SAFE_CODE)
+      print result.inspect
+    rescue => e
+      STDERR.print "Error: #{e.message}"
+    end
+  RUBY
+
+  stdout_str = ''
+  stderr_str = ''
+  status = nil
+  Open3.popen3('ruby', '--disable-gems', '-W0', '-e', wrapper, chdir: WORKSPACE_DIR) do |stdin, stdout, stderr, wait_thr|
+    stdin.close
+    deadline = Time.now + RUBY_EXEC_TIMEOUT
+    begin
+      while wait_thr.alive?
+        if Time.now > deadline
+          Process.kill('KILL', wait_thr.pid) rescue nil
+          return "Error: execution timed out after #{RUBY_EXEC_TIMEOUT}s"
+        end
+        sleep 0.05
+      end
+      stdout_str = stdout.read.to_s
+      stderr_str = stderr.read.to_s
+      status = wait_thr.value
+    rescue => e
+      Process.kill('KILL', wait_thr.pid) rescue nil
+      return "Error: #{e.message}"
+    end
+  end
+
+  return stderr_str unless stderr_str.empty?
+  return "Error: process exited with #{status.exitstatus}" if status && !status.success?
+  stdout_str
 rescue => e
   "Error: #{e.message}"
 end
-
 
 def write_file(input)
   data = JSON.parse(input)
