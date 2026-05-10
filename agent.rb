@@ -283,15 +283,26 @@ end
 
 # ---------- PROMPTS ----------
 
-def planner_prompt(task, memory)
+def planner_prompt(task, memory, current_step: nil, total_steps: nil)
   tools_list = TOOLS.keys.join('|')
   trimmed = memory.last(MEMORY_LIMIT)
+  step_info =
+    if current_step && total_steps
+      "Step #{current_step + 1} of #{total_steps} (#{total_steps - current_step - 1} remaining)"
+    elsif total_steps
+      "You have a budget of #{total_steps} steps."
+    else
+      "Step budget unspecified."
+    end
 
   <<~PROMPT
     You are an autonomous planning agent.
 
     Primary rule:
     - Break down the task into clear steps and decide what to do next.
+
+    Step budget:
+    #{step_info}
 
     Task:
     #{task}
@@ -355,7 +366,7 @@ def agent(task, steps=6)
 
   steps.times do |i|
     # Build the planner prompt from the task and accumulated memory.
-    prompt = planner_prompt(task, memory)
+    prompt = planner_prompt(task, memory, current_step: i, total_steps: steps)
 
     # --- Call the planner LLM with retry on transient network/timeout errors ---
     out = nil
