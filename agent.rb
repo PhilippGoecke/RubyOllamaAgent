@@ -263,6 +263,7 @@ def planner_prompt(task, memory)
     - create_code: generate new code
 
     Planning rules:
+    - Use the available tools whenever they can support planning or coding (e.g., read files for context, list files to explore, fetch URLs or GitHub files for references, run ruby snippets or tests to verify assumptions).
     - Prefer small incremental steps.
     - When code is needed, plan to use write_file with complete file content.
     - Use paths relative to the workspace.
